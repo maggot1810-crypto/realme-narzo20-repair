@@ -1,0 +1,29 @@
+# Firmware images (large binary files)
+01_firmware/**/*.img
+01_firmware/**/*.bin
+01_firmware/**/*.dat
+01_firmware/**/*.zip
+01_firmware/**/super*.bin
+
+# Tools (large binaries and embedded repos)
+00_tools/mtkclient/
+00_tools/platform-tools/*.exe
+00_tools/platform-tools/*.dll
+00_tools/TWRP_extracted/
+00_tools/TWRP_extracted/*.img
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Generated temp files
+zero_*.bin
+*.tmp
+
+# OS
+.DS_Store
+Thumbs.db
+*.log
