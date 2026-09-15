@@ -1,29 +1,56 @@
-# Firmware images (large binary files)
-01_firmware/**/*.img
-01_firmware/**/*.bin
-01_firmware/**/*.dat
-01_firmware/**/*.zip
-01_firmware/**/super*.bin
+# Git
+.git
+.gitignore
 
-# Tools (large binaries and embedded repos)
-00_tools/mtkclient/
-00_tools/platform-tools/*.exe
-00_tools/platform-tools/*.dll
-00_tools/TWRP_extracted/
-00_tools/TWRP_extracted/*.img
-
-# Python cache
+# Python
 __pycache__/
 *.pyc
 *.pyo
 *.pyd
 .Python
+pip-log.txt
+pip-delete-this-directory.txt
+venv/
+env/
+ENV/
 
-# Generated temp files
-zero_*.bin
+# Tools - binaries
+00_tools/mtkclient/
+00_tools/platform-tools/
+00_tools/TWRP_extracted/
+
+# Firmware - images (too large for git)
+01_firmware/*.zip
+01_firmware/*.rar
+01_firmware/**/*.img
+01_firmware/**/*.bin
+01_firmware/**/*.fw
+01_firmware/**/*.sig
+
+# Patches - binary only
+02_patches/*.img
+
+# Scripts - keep .py but ignore binaries
+03_scripts/*.bin
+03_scripts/*.exe
+03_scripts/*.dll
+03_scripts/hwparam.json
+
+# Kernel - keep text but ignore binaries
+04_kernel/*.zip
+04_kernel/**/*.img
+04_kernel/**/*.dtb
+
+# Audio test
+06_audio_test/
+
+# Logs
+*.log
 *.tmp
+*.bak
 
 # OS
 .DS_Store
 Thumbs.db
-*.log
+
+# Exclude solicitu
