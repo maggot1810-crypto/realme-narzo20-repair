@@ -51,16 +51,39 @@ def run_mtk(args: list[str], timeout: int = 120) -> tuple[int, str, str]:
         return -1, "", str(e)
 
 
+def run_mtk_brom(args: list[str], timeout: int = 180) -> tuple[int, str, str]:
+    """Versión con --skipwdt para mantener el dispositivo en BROM entre writes."""
+    cmd = [sys.executable, MTK, "--skipwdt"] + args
+    return run_mtk(cmd, timeout=timeout)
+
+
+def run_mtk_wdt(args: list[str], timeout: int = 120) -> tuple[int, str, str]:
+    """Sin skipwdt (para pruebas y lectura)."""
+    return run_mtk(args, timeout=timeout)
+
+
 def mtk_w(partition: str, img_path: str, timeout: int = 300) -> bool:
-    """Flashea una partición con reintentos."""
+    """Flashea una partición con reintentos usando --skipwdt."""
     for attempt in range(1, MAX_RETRIES + 1):
         log(f"  Partición '{partition}' [{attempt}/{MAX_RETRIES}]")
-        code, out, err = run_mtk(["w", partition, img_path], timeout=timeout)
-        combined = (out + err).lower()
-        if code == 0 and "wrote" in combined and "failed" not in combined:
+        code, out, err = run_mtk_brom(["w", partition, img_path], timeout=timeout)
+        combined = out + err
+        if code == 0 and "Wrote" in combined and "Failed" not in combined:
             log(f"  ✓ '{partition}' OK")
             return True
-        if "usberror" in combined or "input/output" in combined:
+        # Intentar detectar reinicio y reconexión
+        if "Waiting for PreLoader" in combined or "reconnect" in combined.lower():
+            log(f"  ⚠ Dispositivo se desconectó — esperando reconexión...")
+            time.sleep(5)
+            # Verificar si está de vuelta
+            check_code, check_out, check_err = run_mtk_brom(["printgpt"], timeout=30)
+            if check_code == 0 and ("partition" in check_out.lower() or "gpt" in check_out.lower()):
+                log(f"  → Reconectado, reintentando...")
+            else:
+                log(f"  ✗ No detectado después de reconexión")
+                continue
+            continue
+        if "USBError" in combined or "Input/Output" in combined:
             log(f"  ⚠ USBError — reintentando en {RETRY_DELAY}s...")
             time.sleep(RETRY_DELAY)
             continue
@@ -72,19 +95,25 @@ def mtk_w(partition: str, img_path: str, timeout: int = 300) -> bool:
 
 
 def mtk_e(partition: str, timeout: int = 60) -> bool:
-    """Borra una partición con reintentos."""
+    """Borra una partición con reintentos usando --skipwdt."""
     for attempt in range(1, MAX_RETRIES + 1):
-        code, out, err = run_mtk(["e", partition], timeout=timeout)
-        combined = (out + err).lower()
+        code, out, err = run_mtk_brom(["e", partition], timeout=timeout)
+        combined = out + err
         if code == 0:
             log(f"  ✓ '{partition}' borrado")
             return True
-        if "usberror" in combined or "input/output" in combined:
+        if "Waiting for PreLoader" in combined or "reconnect" in combined.lower():
+            log(f"  ⚠ Dispositivo se desconectó — esperando reconexión...")
+            time.sleep(5)
+            check_code, _, _ = run_mtk_brom(["printgpt"], timeout=30)
+            if check_code == 0:
+                log(f"  → Reconectado, reintentando...")
+            continue
+        if "USBError" in combined or "Input/Output" in combined:
             log(f"  ⚠ USBError — reintentando en {RETRY_DELAY}s...")
             time.sleep(RETRY_DELAY)
             continue
-        # Partición puede no existir — eso está bien
-        if "no such" in combined or "not found" in combined:
+        if "no such" in combined.lower() or "not found" in combined.lower():
             log(f"  - '{partition}' no existe (ignorado)")
             return True
         log(f"  ✗ '{partition}' falló: {combined[:200]}")
@@ -94,15 +123,16 @@ def mtk_e(partition: str, timeout: int = 60) -> bool:
 
 
 def detect_brom(timeout: int = 60) -> bool:
-    """Espera y verifica conexión BROM."""
+    """Espera y verifica conexión BROM usando printgpt."""
     log("Esperando dispositivo en BROM... (Vol+ + Vol- + USB)")
-    code, out, err = run_mtk(["i"], timeout=timeout)
+    code, out, err = run_mtk(["printgpt"], timeout=timeout)
     combined = (out + err).lower()
-    if "brom" in combined or "device detected" in combined or "preloader" in combined:
-        log("✓ Dispositivo detectado en BROM")
+    if code == 0 and ("brom" in combined or "partition" in combined or "gpt" in combined):
+        log("✓ Dispositivo detectado en BROM — GPT lista")
         return True
     log("✗ Dispositivo no detectado. Verifica conexión BROM.")
-    log("  Apaga el teléfono → Vol+ + Vol- + USB → conecta a USB 2.0")
+    log("  Apaga el teléfono → Vol+ + Vol- + USB → conecte a USB 2.0")
+    log(f"  Detalle: {combined[:300]}")
     return False
 
 
