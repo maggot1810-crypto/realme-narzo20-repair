@@ -6,16 +6,16 @@ import time
 # Configuración de rutas
 PY = sys.executable
 MTK = r"D:\Usuarios\Administrador\Documents\Custom ROM\00_tools\mtkclient\mtk.py"
-PRELOADER = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\Realme_RMX2193_C.18_Firmware_extracted\preloader_oppo6769.bin"
-SUPER_IMG = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\Realme_RMX2193_C.18_Firmware_extracted\super.img"
+PRELOADER = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\preloader_oppo6769.bin"
+SUPER_IMG = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\super.img"
 COM = "COM9"
 
 # Offset físico de la partición 'super' en EMMC_USER (Sacado del scatter)
 SUPER_PHYSICAL_OFFSET = 0x55000000 
 GPT_ARGS = ["--gpt-num-part-entries", "128", "--gpt-part-entry-size", "128", "--sectorsize", "512"]
 
-# Dividiremos los 7.2GB en 8 trozos de ~900MB
-CHUNK_SIZE = 900 * 1024 * 1024 # 900 MB
+# Dividiremos los 7.2GB en trozos de ~500MB (más estable en USB 2.0)
+CHUNK_SIZE = 500 * 1024 * 1024  # 500 MB
 FILE_SIZE = os.path.getsize(SUPER_IMG)
 
 def wait_for_brom():
@@ -58,6 +58,8 @@ def flash_chunk(chunk_index, start_byte, size):
         print(f"❌ Error: {e}")
         return False
 
+MAX_RETRIES = 3
+
 def main():
     chunks = []
     current = 0
@@ -67,17 +69,21 @@ def main():
         current += size
 
     print(f"Plan de flasheo: {len(chunks)} trozos detectados.")
-    
+
     for i, (offset, size) in enumerate(chunks):
         success = False
-        while not success:
-            print(f"\n>>> PROCESANDO TROZO {i+1} de {len(chunks)} (Progreso: {offset/FILE_SIZE*100:.1f}%)")
+        for attempt in range(1, MAX_RETRIES + 1):
+            print(f"\n>>> TROZO {i+1}/{len(chunks)} | Intento {attempt}/{MAX_RETRIES} | Progreso: {offset/FILE_SIZE*100:.1f}%")
             wait_for_brom()
             success = flash_chunk(i+1, offset, size)
-            if not success:
-                print("Reintentando trozo... Prepara el teléfono de nuevo.")
+            if success:
+                break
+            print(f"❌ Falló intento {attempt}. {'Sin más intentos. Saltando...' if attempt == MAX_RETRIES else 'Prepara el teléfono de nuevo y presiona ENTER.'}")
+            if attempt < MAX_RETRIES:
                 time.sleep(2)
-    
+        if not success:
+            print(f"\n⚠️ TROZO {i+1} falló después de {MAX_RETRIES} intentos. Continúa con el siguiente.\n")
+
     print("\n" + "#"*60)
     print("  ¡TODO EL SUPER.IMG HA SIDO FLASHEADO POR PARTES!  ")
     print("#"*60)
