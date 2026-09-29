@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """
 flash_super_sliced.py
-Flashea super.img en chunks de 500MB desde BROM para RMX2193 (Helio G85).
+Flashea super.img en chunks de 300MB desde BROM para RMX2193 (Helio G85).
 Cada chunk se reintent indefinidamente hasta que el write sea exitoso.
+Se reconecta automáticamente al detectar desconexión del dispositivo.
 
 Uso:
   python flash_super_sliced.py
 
 Requisitos:
-  - Cable USB 2.0 obligatorio
   - Batería > 50%
-  - Telefonos en modo BROM (Vol+ + Vol- + USB) cuando el script lo pida
+  - Teléfono en modo BROM al iniciar (Vol+ + Vol- + USB)
+  - Una vez conectado, el script maneja las reconexiones automáticamente
 """
 
 import os
@@ -19,16 +20,18 @@ import subprocess
 import time
 
 # ── Rutas ───────────────────────────────────────────────────────
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+ROOT_DIR = os.path.dirname(SCRIPT_DIR)
 PY = sys.executable
-MTK = r"D:\Usuarios\Administrador\Documents\Custom ROM\00_tools\mtkclient\mtk.py"
-PRELOADER = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\preloader_oppo6769.bin"
-SUPER_IMG = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\super.img"
-COM = "COM5"
+MTK = os.path.join(ROOT_DIR, "00_tools", "mtkclient", "mtk.py")
+PRELOADER = os.path.join(ROOT_DIR, "01_firmware", "RMX2193_C.18_India", "preloader_oppo6769.bin")
+SUPER_IMG = os.path.join(ROOT_DIR, "01_firmware", "RMX2193_C.18_India", "super.img")
+COM = "COM7"
 
 SUPER_PHYSICAL_OFFSET = 0x55000000
 GPT_ARGS = ["--gpt-num-part-entries", "128", "--gpt-part-entry-size", "128", "--sectorsize", "512"]
 
-CHUNK_SIZE = 300 * 1024 * 1024   # 300 MB por chunk — balance velocidad/estabilidad USB 3.0
+CHUNK_SIZE = 300 * 1024 * 1024   # 300 MB por chunk
 FILE_SIZE = os.path.getsize(SUPER_IMG)
 
 BAR_WIDTH = 40
@@ -44,22 +47,36 @@ def progress_bar(done_chunks, total_chunks, chunk_name=""):
           end="", flush=True)
 
 
-# ── Esperar conexión BROM ───────────────────────────────────────
-def wait_for_brom():
+# ── Esperar conexión BROM automática ─────────────────────────────
+def wait_for_brom(timeout=120):
+    """Espera automáticamente a que el dispositivo esté en BROM."""
     print("\n" + "─" * 60)
-    print("  CONECTAR TELÉFONO EN MODO BROM:")
-    print("  1. Apagar teléfono (Power 10s)")
-    print("  2. Vol ARRIBA + Vol ABAJO + USB conectado (mantener)")
-    print("  3. Presionar ENTER cuando la terminal detecte el dispositivo")
+    print("  ESPERANDO CONEXIÓN BROM AUTOMÁTICAMENTE...")
+    print(f"  Puerto: {COM}")
+    print("  Si no detecta el dispositivo, reconecta el USB en modo BROM")
+    print("  (Vol ARRIBA + Vol ABAJO + USB)")
     print("─" * 60)
-    input("Presiona [ENTER] cuando esté conectado...")
+    
+    start = time.time()
+    while time.time() - start < timeout:
+        result = subprocess.run(
+            [PY, MTK, "--serialport", COM, "devices"],
+            capture_output=True, text=True, timeout=10
+        )
+        combined = result.stdout + result.stderr
+        if "MT6768" in combined or "MT6769" in combined:
+            print(f"  ✓ Dispositivo detectado en {COM}")
+            return True
+        time.sleep(2)
+    
+    print("  ✗ Timeout: no se detectó dispositivo")
+    return False
 
 
 # ── Flash de un chunk individual ────────────────────────────────
 def flash_chunk(chunk_index, start_byte, size):
     temp_chunk = f"super_chunk_{chunk_index}.bin"
 
-    # Extraer chunk del super.img
     with open(SUPER_IMG, "rb") as f_in, open(temp_chunk, "wb") as f_out:
         f_in.seek(start_byte)
         f_out.write(f_in.read(size))
@@ -73,7 +90,7 @@ def flash_chunk(chunk_index, start_byte, size):
 
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        os.remove(temp_chunk)  # limpiar temporal
+        os.remove(temp_chunk)
         combined = r.stdout + r.stderr
         if "Wrote" in combined:
             return True, combined
@@ -90,7 +107,6 @@ def flash_chunk(chunk_index, start_byte, size):
 
 # ── Loop principal ──────────────────────────────────────────────
 def main():
-    # Construir lista de chunks
     chunks = []
     current = 0
     while current < FILE_SIZE:
@@ -102,7 +118,7 @@ def main():
     done = 0
 
     print("═" * 60)
-    print("  SUPER.IMG FLASHER — CHUNKED (500MB)  |  RMX2193")
+    print("  SUPER.IMG FLASHER — CHUNKED (300MB)  |  RMX2193")
     print(f"  Total: {total} chunks  |  {FILE_SIZE/1024**3:.2f} GB")
     print("  Presiona Ctrl+C en cualquier momento para cancelar")
     print("═" * 60)
@@ -114,9 +130,12 @@ def main():
         while True:
             attempt += 1
             progress_bar(done, total, f"| Chunk {chunk_num} intento {attempt}")
-            print()  # nueva línea después del progress bar
+            print()
 
-            wait_for_brom()
+            if not wait_for_brom():
+                print(f"  → Esperando conexión...")
+                continue
+
             ok, result = flash_chunk(chunk_num, offset, size)
 
             if ok:
@@ -129,8 +148,8 @@ def main():
                 err_short = result[:120].replace("\n", " ")
                 print(f"  ❌ Chunk {chunk_num} falló (intento {attempt})")
                 print(f"     Error: {err_short}")
-                print(f"  → Reconecta en BROM y presiona ENTER para reintentar...")
-                input()  # pausa hasta que el usuario conecte y presione ENTER
+                print(f"  → Reconectando automáticamente...")
+                time.sleep(3)
 
     print("\n" + "╔" + "═" * 58 + "╗")
     print("║         ✅ SUPER.IMG COMPLETAMENTE FLASHEADO ✅          ║")
