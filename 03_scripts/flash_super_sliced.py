@@ -1,66 +1,96 @@
+#!/usr/bin/env python3
+"""
+flash_super_sliced.py
+Flashea super.img en chunks de 500MB desde BROM para RMX2193 (Helio G85).
+Cada chunk se reintent indefinidamente hasta que el write sea exitoso.
+
+Uso:
+  python flash_super_sliced.py
+
+Requisitos:
+  - Cable USB 2.0 obligatorio
+  - Batería > 50%
+  - Telefonos en modo BROM (Vol+ + Vol- + USB) cuando el script lo pida
+"""
+
 import os
 import sys
 import subprocess
 import time
 
-# Configuración de rutas
+# ── Rutas ───────────────────────────────────────────────────────
 PY = sys.executable
 MTK = r"D:\Usuarios\Administrador\Documents\Custom ROM\00_tools\mtkclient\mtk.py"
 PRELOADER = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\preloader_oppo6769.bin"
 SUPER_IMG = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\super.img"
 COM = "COM9"
 
-# Offset físico de la partición 'super' en EMMC_USER (Sacado del scatter)
-SUPER_PHYSICAL_OFFSET = 0x55000000 
+SUPER_PHYSICAL_OFFSET = 0x55000000
 GPT_ARGS = ["--gpt-num-part-entries", "128", "--gpt-part-entry-size", "128", "--sectorsize", "512"]
 
-# Dividiremos los 7.2GB en trozos de ~500MB (más estable en USB 2.0)
-CHUNK_SIZE = 500 * 1024 * 1024  # 500 MB
+CHUNK_SIZE = 500 * 1024 * 1024   # 500 MB por chunk
 FILE_SIZE = os.path.getsize(SUPER_IMG)
 
-def wait_for_brom():
-    print("\n" + "="*60)
-    print(" ENTRAR EN MODO BROM (NUEVA SESIÓN PARA CADA TROZO):")
-    print(" 1. Apaga el teléfono (Power 20s).")
-    print(" 2. Vol+ y Vol- presionados + Conectar USB.")
-    print("="*60)
-    input("Presiona [ENTER] cuando el teléfono esté conectado en COM9...")
+BAR_WIDTH = 40
 
+
+# ── Barra de progreso general ──────────────────────────────────
+def progress_bar(done_chunks, total_chunks, chunk_name=""):
+    pct = done_chunks / total_chunks
+    filled = int(BAR_WIDTH * pct)
+    bar = "█" * filled + "░" * (BAR_WIDTH - filled)
+    print(f"\r  [{bar}] {done_chunks}/{total_chunks} chunks | {pct*100:.1f}% "
+          f"| {done_chunks * CHUNK_SIZE / 1024**2:.0f} MB/{FILE_SIZE/1024**3:.2f} GB  {chunk_name}",
+          end="", flush=True)
+
+
+# ── Esperar conexión BROM ───────────────────────────────────────
+def wait_for_brom():
+    print("\n" + "─" * 60)
+    print("  CONECTAR TELÉFONO EN MODO BROM:")
+    print("  1. Apagar teléfono (Power 10s)")
+    print("  2. Vol ARRIBA + Vol ABAJO + USB conectado (mantener)")
+    print("  3. Presionar ENTER cuando la terminal detecte el dispositivo")
+    print("─" * 60)
+    input("Presiona [ENTER] cuando esté conectado...")
+
+
+# ── Flash de un chunk individual ────────────────────────────────
 def flash_chunk(chunk_index, start_byte, size):
-    # Creamos un archivo temporal para el trozo
     temp_chunk = f"super_chunk_{chunk_index}.bin"
-    print(f"\n[Slicing] Extrayendo trozo {chunk_index} ({size/1024**2:.1f} MB)...")
-    
-    with open(SUPER_IMG, "rb") as f_in:
+
+    # Extraer chunk del super.img
+    with open(SUPER_IMG, "rb") as f_in, open(temp_chunk, "wb") as f_out:
         f_in.seek(start_byte)
-        data = f_in.read(size)
-        with open(temp_chunk, "wb") as f_out:
-            f_out.write(data)
-    
-    # El offset de escritura es el offset base de super + el inicio del trozo
+        f_out.write(f_in.read(size))
+
     write_offset = hex(SUPER_PHYSICAL_OFFSET + start_byte)
-    
-    print(f"[Flash] Escribiendo trozo {chunk_index} en offset {write_offset}...")
-    cmd = [PY, MTK, "--serialport", COM, "--preloader", PRELOADER] + GPT_ARGS + ["wo", write_offset, hex(size), temp_chunk]
-    
+    size_hex = hex(size)
+
+    cmd = [PY, MTK, "--serialport", COM, "--preloader", PRELOADER] + GPT_ARGS + [
+        "wo", write_offset, size_hex, temp_chunk
+    ]
+
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-        os.remove(temp_chunk) # Limpiar temporal
-        if "Wrote" in r.stdout + r.stderr:
-            print(f"✅ Trozo {chunk_index} flasheado con éxito.")
-            return True
-        else:
-            print(f"❌ Fallo en trozo {chunk_index}:")
-            print(r.stdout + r.stderr)
-            return False
+        os.remove(temp_chunk)  # limpiar temporal
+        combined = r.stdout + r.stderr
+        if "Wrote" in combined:
+            return True, combined
+        return False, combined
+    except subprocess.TimeoutExpired:
+        if os.path.exists(temp_chunk):
+            os.remove(temp_chunk)
+        return False, "TIMEOUT"
     except Exception as e:
-        if os.path.exists(temp_chunk): os.remove(temp_chunk)
-        print(f"❌ Error: {e}")
-        return False
+        if os.path.exists(temp_chunk):
+            os.remove(temp_chunk)
+        return False, str(e)
 
-MAX_RETRIES = 3
 
+# ── Loop principal ──────────────────────────────────────────────
 def main():
+    # Construir lista de chunks
     chunks = []
     current = 0
     while current < FILE_SIZE:
@@ -68,25 +98,48 @@ def main():
         chunks.append((current, size))
         current += size
 
-    print(f"Plan de flasheo: {len(chunks)} trozos detectados.")
+    total = len(chunks)
+    done = 0
+
+    print("═" * 60)
+    print("  SUPER.IMG FLASHER — CHUNKED (500MB)  |  RMX2193")
+    print(f"  Total: {total} chunks  |  {FILE_SIZE/1024**3:.2f} GB")
+    print("  Presiona Ctrl+C en cualquier momento para cancelar")
+    print("═" * 60)
 
     for i, (offset, size) in enumerate(chunks):
-        success = False
-        for attempt in range(1, MAX_RETRIES + 1):
-            print(f"\n>>> TROZO {i+1}/{len(chunks)} | Intento {attempt}/{MAX_RETRIES} | Progreso: {offset/FILE_SIZE*100:.1f}%")
-            wait_for_brom()
-            success = flash_chunk(i+1, offset, size)
-            if success:
-                break
-            print(f"❌ Falló intento {attempt}. {'Sin más intentos. Saltando...' if attempt == MAX_RETRIES else 'Prepara el teléfono de nuevo y presiona ENTER.'}")
-            if attempt < MAX_RETRIES:
-                time.sleep(2)
-        if not success:
-            print(f"\n⚠️ TROZO {i+1} falló después de {MAX_RETRIES} intentos. Continúa con el siguiente.\n")
+        chunk_num = i + 1
+        attempt = 0
 
-    print("\n" + "#"*60)
-    print("  ¡TODO EL SUPER.IMG HA SIDO FLASHEADO POR PARTES!  ")
-    print("#"*60)
+        while True:
+            attempt += 1
+            progress_bar(done, total, f"| Chunk {chunk_num} intento {attempt}")
+            print()  # nueva línea después del progress bar
+
+            wait_for_brom()
+            ok, result = flash_chunk(chunk_num, offset, size)
+
+            if ok:
+                print(f"  ✅ Chunk {chunk_num}/{total} OK  ({size/1024**2:.0f} MB)")
+                done += 1
+                progress_bar(done, total)
+                print()
+                break
+            else:
+                err_short = result[:120].replace("\n", " ")
+                print(f"  ❌ Chunk {chunk_num} falló (intento {attempt})")
+                print(f"     Error: {err_short}")
+                print(f"  → Reconecta en BROM y presiona ENTER para reintentar...")
+                input()  # pausa hasta que el usuario conecte y presione ENTER
+
+    print("\n" + "╔" + "═" * 58 + "╗")
+    print("║         ✅ SUPER.IMG COMPLETAMENTE FLASHEADO ✅          ║")
+    print("╚" + "═" * 58 + "╝")
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n\n⚠️ Interrumpido por el usuario.")
+        sys.exit(1)
