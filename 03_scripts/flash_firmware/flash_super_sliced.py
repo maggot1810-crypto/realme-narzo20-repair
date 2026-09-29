@@ -28,7 +28,7 @@ COM = "COM5"
 SUPER_PHYSICAL_OFFSET = 0x55000000
 GPT_ARGS = ["--gpt-num-part-entries", "128", "--gpt-part-entry-size", "128", "--sectorsize", "512"]
 
-CHUNK_SIZE = 100 * 1024 * 1024   # 100 MB por chunk — más estable en USB 2.0
+CHUNK_SIZE = 300 * 1024 * 1024   # 300 MB por chunk — balance velocidad/estabilidad USB 3.0
 FILE_SIZE = os.path.getsize(SUPER_IMG)
 
 BAR_WIDTH = 40
