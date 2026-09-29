@@ -23,7 +23,7 @@ PY = sys.executable
 MTK = r"D:\Usuarios\Administrador\Documents\Custom ROM\00_tools\mtkclient\mtk.py"
 PRELOADER = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\preloader_oppo6769.bin"
 SUPER_IMG = r"D:\Usuarios\Administrador\Documents\Custom ROM\01_firmware\RMX2193_C.18_India\super.img"
-COM = "COM9"
+COM = "COM5"
 
 SUPER_PHYSICAL_OFFSET = 0x55000000
 GPT_ARGS = ["--gpt-num-part-entries", "128", "--gpt-part-entry-size", "128", "--sectorsize", "512"]
